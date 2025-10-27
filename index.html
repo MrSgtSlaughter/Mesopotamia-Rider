@@ -1,25 +1,573 @@
 <!DOCTYPE html>
-<html lang="en-us">
-
+<html lang="en">
 <head>
-    <meta charset="utf-8">
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
-    <title>Snow Rider 3D</title>
-    <link rel="shortcut icon" href="TemplateData/favicon.ico">
-    <link rel="stylesheet" href="TemplateData/style.css">
-    <meta name="description" content="Snow Rider 3D, Snow Rider 3D Mathnook, Snow Rider 3D Unblocked">
-    <meta property="og:image" content="snow-rider-3d.png" />
-    <script src="TemplateData/UnityProgress.js"></script>
-    <script src="Build/UnityLoader.js"></script>
-    <script>
-        var gameInstance = UnityLoader.instantiate("gameContainer", "Build/SnowRider3D-gd-1.json", { onProgress: UnityProgress, Module: { onRuntimeInitialized: function () { UnityProgress(gameInstance, "complete") } } });
-    </script>
+<meta charset="utf-8" />
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Mesopotamia Rider</title>
+
+<link rel="icon" href="TemplateData/favicon.ico" />
+<link rel="stylesheet" href="TemplateData/style.css" />
+<script src="TemplateData/UnityProgress.js"></script>
+<script src="Build/UnityLoader.js"></script>
+
+<!-- Firebase (modular v10-style CDN builds) -->
+<script type="module">
+  // --- FIREBASE SETUP ---
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+  import {
+    getFirestore,
+    collection,
+    addDoc,
+    query,
+    orderBy,
+    limit,
+    getDocs
+  } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+  // 🔥 TODO: replace with YOUR firebaseConfig from the Firebase console
+  const firebaseConfig = {
+    apiKey: "YOUR_KEY_HERE",
+    authDomain: "YOUR_PROJECT.firebaseapp.com",
+    projectId: "YOUR_PROJECT_ID",
+    storageBucket: "YOUR_PROJECT.appspot.com",
+    messagingSenderId: "SENDER_ID",
+    appId: "APP_ID"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+
+  // We'll expose db to window so non-module script can use it:
+  window._db = db;
+  window._firestoreFns = { collection, addDoc, query, orderBy, limit, getDocs };
+</script>
+
+<style>
+  /* basic utility look without Tailwind dependency */
+
+  body {
+    margin: 0;
+    background-color: #0f172a; /* dark navy */
+    color: #f8fafc;           /* off-white */
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+
+  .layout-root {
+    display: grid;
+    grid-template-columns: 1fr 320px;
+    gap: 1rem;
+    padding: 1rem;
+    height: 100vh;
+    box-sizing: border-box;
+  }
+
+  /* Left side holds the game */
+  .game-wrapper {
+    background-color: #1e293b;
+    border-radius: 1rem;
+    box-shadow: 0 20px 40px rgba(0,0,0,0.6);
+    position: relative;
+    overflow: hidden;
+    min-height: 60vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  #gameContainer {
+    width: 960px;
+    height: 600px;
+    max-width: 100%;
+    max-height: 70vh;
+    margin: auto;
+    background: #000;
+  }
+
+  /* Right sidebar = scoreboard / controls */
+  .sidebar {
+    background-color: #1e293b;
+    border-radius: 1rem;
+    box-shadow: 0 20px 40px rgba(0,0,0,0.6);
+    padding: 1rem 1rem 2rem;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .sidebar h2 {
+    margin: 0 0 .5rem;
+    font-size: 1rem;
+    font-weight: 600;
+    color: #38bdf8; /* cyan-ish accent */
+    letter-spacing: -0.03em;
+  }
+
+  .stat-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: .9rem;
+    padding: .4rem .6rem;
+    background: #0f172a;
+    border-radius: .5rem;
+    margin-bottom: .4rem;
+  }
+
+  .panel {
+    background: #0f172a;
+    border-radius: .75rem;
+    padding: .75rem;
+    margin-top: 1rem;
+    flex: 1;
+    overflow: auto;
+    min-height: 0;
+  }
+
+  .panel h3 {
+    margin: 0 0 .5rem;
+    font-size: .9rem;
+    font-weight: 500;
+    color: #facc15; /* yellow accent */
+  }
+
+  .leaderboard-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: .8rem;
+  }
+  .leaderboard-table th {
+    text-align: left;
+    font-weight: 600;
+    padding-bottom: .5rem;
+    color: #94a3b8;
+  }
+  .leaderboard-table td {
+    padding: .25rem 0;
+    border-bottom: 1px solid #334155;
+    color: #f8fafc;
+  }
+
+  .btn {
+    appearance: none;
+    background-color: #38bdf8;
+    color: #0f172a;
+    border: 0;
+    font-weight: 600;
+    font-size: .9rem;
+    border-radius: .5rem;
+    padding: .6rem .8rem;
+    cursor: pointer;
+    width: 100%;
+    text-align: center;
+  }
+  .btn:active {
+    transform: scale(.98);
+  }
+
+  /* QUIZ MODAL OVERLAY */
+  .overlay-bg {
+    position: absolute;
+    inset: 0;
+    background: rgba(15,23,42,.9); /* nearly black with tint */
+    color: #f8fafc;
+    display: none; /* toggled on with JS */
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+    z-index: 9999;
+  }
+
+  .overlay-card {
+    background: #1e293b;
+    border-radius: 1rem;
+    width: 90%;
+    max-width: 400px;
+    box-shadow: 0 20px 40px rgba(0,0,0,.8);
+    padding: 1rem 1.25rem 1.5rem;
+  }
+
+  .overlay-card h2 {
+    margin-top: 0;
+    font-size: 1rem;
+    color: #38bdf8;
+    font-weight: 600;
+    letter-spacing: -0.03em;
+  }
+
+  .overlay-card p.prompt {
+    font-size: .9rem;
+    line-height: 1.4;
+    margin: .5rem 0 1rem 0;
+    color: #f8fafc;
+  }
+
+  .choices {
+    display: grid;
+    gap: .5rem;
+    margin-bottom: 1rem;
+  }
+
+  .choice-btn {
+    background: #0f172a;
+    border-radius: .5rem;
+    border: 2px solid #334155;
+    color: #f8fafc;
+    text-align: left;
+    padding: .6rem .75rem;
+    cursor: pointer;
+    font-size: .85rem;
+    font-weight: 500;
+    line-height: 1.3;
+  }
+  .choice-btn.correct {
+    border-color: #22c55e;
+    background: #064e3b;
+  }
+  .choice-btn.wrong {
+    border-color: #ef4444;
+    background: #450a0a;
+  }
+
+  .result-msg {
+    font-size: .8rem;
+    min-height: 1.2em;
+    color: #facc15;
+    margin-bottom: 1rem;
+    font-weight: 500;
+  }
+
+  /* SCORE SUBMIT MODAL (reuse same overlay container for simplicity) */
+  .name-input-row {
+    display: flex;
+    gap: .5rem;
+    margin-bottom: 1rem;
+  }
+  .name-input-row input {
+    flex: 1;
+    border-radius: .5rem;
+    border: 2px solid #334155;
+    background: #0f172a;
+    padding: .6rem .75rem;
+    color: #f8fafc;
+    font-size: .9rem;
+  }
+  .name-input-row input:focus {
+    outline: 2px solid #38bdf8;
+  }
+
+  /* small screen stacking */
+  @media (max-width: 900px) {
+    .layout-root {
+      grid-template-columns: 1fr;
+      grid-template-rows: auto auto;
+      height: auto;
+    }
+    .sidebar {
+      order: -1;
+      max-height: none;
+    }
+    #gameContainer {
+      max-height: 60vh;
+    }
+  }
+</style>
+
 </head>
+<body>
 
-<body style="overflow:hidden; margin:0; padding:0;">
-    <div class="webgl-content" style="position: absolute; width: 100%; height: 100%;">
-        <div id="gameContainer" style="width: 960px; height: 600px; margin: auto"></div>
+<div class="layout-root">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <h2>Mesopotamia Rider</h2>
+    <div class="stat-row">
+      <span>Quiz Points</span>
+      <strong id="quizPoints">0</strong>
     </div>
-</body>
+    <div class="stat-row">
+      <span>Questions Correct</span>
+      <strong id="questionsCorrect">0</strong>
+    </div>
+    <div class="stat-row">
+      <span>Questions Seen</span>
+      <strong id="questionsSeen">0</strong>
+    </div>
 
+    <button class="btn" id="saveScoreBtn">Submit Score to Leaderboard</button>
+
+    <div class="panel">
+      <h3>Top Riders (Class)</h3>
+      <table class="leaderboard-table" id="leaderboardTable">
+        <thead>
+          <tr><th>Name</th><th>Score</th></tr>
+        </thead>
+        <tbody id="leaderboardBody">
+          <!-- filled by JS -->
+        </tbody>
+      </table>
+    </div>
+  </aside>
+
+  <!-- GAME AREA -->
+  <main class="game-wrapper">
+    <!-- Unity game canvas will render here -->
+    <div id="gameContainer"></div>
+
+    <!-- Overlay popup (quiz AND name submit reuse this container) -->
+    <div class="overlay-bg" id="overlayBg">
+      <div class="overlay-card" id="overlayCard">
+        <!-- JS will inject quiz or leaderboard submit UI here -->
+      </div>
+    </div>
+  </main>
+
+</div>
+
+<script>
+  // ==============
+  // 1. START UNITY
+  // ==============
+  var gameInstance = UnityLoader.instantiate("gameContainer", "Build/SnowRider3D-gd-1.json", {
+    onProgress: function (gameInstance, progress) {
+      UnityProgress(gameInstance, progress);
+    }
+  });
+
+  // =========================
+  // 2. MESOPOTAMIA QUESTIONS
+  // =========================
+  // Each question:
+  // {
+  //   q: "Which river...",
+  //   choices: ["A: ...", "B: ...", "C: ...", "D: ..."],
+  //   answerIndex: 1 // 0-based
+  // }
+  const questions = [
+    {
+      q: "Mesopotamia is often called the \"Cradle of Civilization\" because...?",
+      choices: [
+        "A: It had the world's first metal coins.",
+        "B: It was one of the first places with cities, writing, and laws.",
+        "C: It was the coldest region in the ancient world.",
+        "D: It discovered chocolate."
+      ],
+      answerIndex: 1
+    },
+    {
+      q: "Which two rivers surrounded Mesopotamia?",
+      choices: [
+        "A: Nile and Amazon",
+        "B: Yellow and Indus",
+        "C: Tigris and Euphrates",
+        "D: Mississippi and Rio Grande"
+      ],
+      answerIndex: 2
+    },
+    {
+      q: "What was cuneiform?",
+      choices: [
+        "A: A type of pyramid temple",
+        "B: A style of ancient boat",
+        "C: A wedge-shaped writing system",
+        "D: A military leader"
+      ],
+      answerIndex: 2
+    }
+    // TODO: add a lot more
+  ];
+
+  let quizPoints = 0;
+  let questionsCorrect = 0;
+  let questionsSeen = 0;
+
+  // how often to interrupt with a quiz (ms)
+  const QUIZ_INTERVAL_MS = 45000; // ~45 seconds
+
+  let quizTimer = setInterval(() => {
+    showQuiz();
+  }, QUIZ_INTERVAL_MS);
+
+  function updateStatsUI() {
+    document.getElementById("quizPoints").textContent = quizPoints;
+    document.getElementById("questionsCorrect").textContent = questionsCorrect;
+    document.getElementById("questionsSeen").textContent = questionsSeen;
+  }
+
+  function pickQuestion() {
+    return questions[Math.floor(Math.random() * questions.length)];
+  }
+
+  function showOverlay(htmlInner) {
+    const overlayBg = document.getElementById("overlayBg");
+    const overlayCard = document.getElementById("overlayCard");
+    overlayCard.innerHTML = htmlInner;
+    overlayBg.style.display = "flex";
+  }
+
+  function hideOverlay() {
+    const overlayBg = document.getElementById("overlayBg");
+    overlayBg.style.display = "none";
+  }
+
+  // QUIZ LOGIC
+  function showQuiz() {
+    const qObj = pickQuestion();
+    questionsSeen++;
+
+    let choicesHTML = "";
+    qObj.choices.forEach((c, idx) => {
+      choicesHTML += `
+        <button class="choice-btn" data-choice="${idx}">${c}</button>
+      `;
+    });
+
+    const quizHTML = `
+      <h2>Mesopotamia Checkpoint</h2>
+      <p class="prompt">${qObj.q}</p>
+      <div class="choices">
+        ${choicesHTML}
+      </div>
+      <div class="result-msg" id="resultMsg"></div>
+      <button class="btn" id="continueBtn" disabled>Continue</button>
+    `;
+
+    showOverlay(quizHTML);
+
+    const choiceButtons = document.querySelectorAll(".choice-btn");
+    const resultMsg = document.getElementById("resultMsg");
+    const continueBtn = document.getElementById("continueBtn");
+
+    let answered = false;
+    choiceButtons.forEach(btn => {
+      btn.addEventListener("click", () => {
+        if (answered) return;
+        answered = true;
+
+        const picked = parseInt(btn.dataset.choice, 10);
+        if (picked === qObj.answerIndex) {
+          btn.classList.add("correct");
+          resultMsg.textContent = "Correct! +100 points.";
+          quizPoints += 100;
+          questionsCorrect += 1;
+        } else {
+          btn.classList.add("wrong");
+          resultMsg.textContent = "Not quite. No points this time.";
+          // highlight correct answer
+          choiceButtons[qObj.answerIndex].classList.add("correct");
+        }
+
+        // lock all buttons
+        choiceButtons.forEach(b => {
+          b.disabled = true;
+        });
+
+        updateStatsUI();
+        continueBtn.disabled = false;
+      });
+    });
+
+    continueBtn.addEventListener("click", () => {
+      hideOverlay();
+    });
+  }
+
+  // =================================
+  // 3. LEADERBOARD SAVE / RETRIEVAL
+  // =================================
+  async function saveScoreFlow() {
+    // build a mini form in the overlay:
+    const saveHTML = `
+      <h2>Submit Score</h2>
+      <p class="prompt">Enter your initials or first name to post your score to the class leaderboard.</p>
+      <div class="name-input-row">
+        <input id="playerNameInput" maxlength="12" placeholder="Your name/initials"/>
+      </div>
+      <div class="stat-row" style="margin-bottom:1rem; background:#1e293b; border:1px solid #334155;">
+        <span>Total Quiz Points</span>
+        <strong>${quizPoints}</strong>
+      </div>
+      <div class="result-msg" id="submitMsg"></div>
+      <button class="btn" id="submitScoreBtn">Submit</button>
+      <button class="btn" id="cancelSubmitBtn" style="margin-top:.5rem; background:#334155; color:#f8fafc;">Cancel</button>
+    `;
+
+    showOverlay(saveHTML);
+
+    document.getElementById("cancelSubmitBtn").addEventListener("click", () => {
+      hideOverlay();
+    });
+
+    document.getElementById("submitScoreBtn").addEventListener("click", async () => {
+      const nameVal = document.getElementById("playerNameInput").value.trim();
+      const msgEl = document.getElementById("submitMsg");
+
+      if (!nameVal) {
+        msgEl.textContent = "Please enter a name.";
+        return;
+      }
+
+      try {
+        const db = window._db;
+        const { collection, addDoc } = window._firestoreFns;
+
+        await addDoc(collection(db, "mesoLeaderboard"), {
+          name: nameVal,
+          score: quizPoints,
+          ts: Date.now()
+        });
+
+        msgEl.textContent = "Score submitted!";
+        // After submit, refresh leaderboard
+        loadLeaderboard();
+      } catch (err) {
+        console.error(err);
+        msgEl.textContent = "Error saving score.";
+      }
+    });
+  }
+
+  async function loadLeaderboard() {
+    try {
+      const db = window._db;
+      const { collection, query, orderBy, limit, getDocs } = window._firestoreFns;
+
+      // Top 10 by score desc
+      const q = query(
+        collection(db, "mesoLeaderboard"),
+        orderBy("score", "desc"),
+        limit(10)
+      );
+
+      const snap = await getDocs(q);
+      const rows = [];
+      snap.forEach(doc => {
+        const data = doc.data();
+        rows.push(`<tr><td>${escapeHtml(data.name)}</td><td>${data.score}</td></tr>`);
+      });
+
+      document.getElementById("leaderboardBody").innerHTML = rows.join("");
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  function escapeHtml(str) {
+    return (str || "")
+      .replace(/&/g,"&amp;")
+      .replace(/</g,"&lt;")
+      .replace(/>/g,"&gt;")
+      .replace(/"/g,"&quot;")
+      .replace(/'/g,"&#039;");
+  }
+
+  // wire up button + initial leaderboard load
+  document.getElementById("saveScoreBtn").addEventListener("click", saveScoreFlow);
+  loadLeaderboard();
+
+  // OPTIONAL: if you want to force a quiz immediately at start for testing:
+  // showQuiz();
+</script>
+
+</body>
 </html>
