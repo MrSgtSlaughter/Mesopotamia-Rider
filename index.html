@@ -13,10 +13,11 @@
 
 <!-- Firebase (modular CDN imports) -->
 <script type="module">
-  // --- FIREBASE SETUP ---
   // 1. Go to Firebase Console -> Project Settings -> Your Apps -> Web App
-  // 2. Copy your config and paste it below.
-  // 3. Do NOT check this into public repos with real private keys if you care about locking it down.
+  // 2. Copy your config into firebaseConfig below.
+  // 3. You must also set up Firestore in test mode or with rules that allow add/read
+  //    from mesoLeaderboard if you're just doing classroom use.
+
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
   import {
     getFirestore,
@@ -40,13 +41,15 @@
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
 
-  // Expose Firestore to non-module script below
+  // Expose Firestore handles to the non-module script below
   window._db = db;
   window._firestoreFns = { collection, addDoc, query, orderBy, limit, getDocs };
 </script>
 
 <style>
-  /* --- Layout / theme --- */
+  /* ===========================
+     Base theme / layout wrappers
+     =========================== */
 
   body {
     margin: 0;
@@ -57,7 +60,7 @@
 
   .layout-root {
     display: grid;
-    grid-template-columns: 1fr 320px; /* big game, skinny sidebar */
+    grid-template-columns: 1fr 320px; /* big game area, skinny sidebar */
     gap: 1rem;
     padding: 1rem;
     height: 100vh;
@@ -70,8 +73,12 @@
     border-radius: 1rem;
     box-shadow: 0 20px 40px rgba(0,0,0,0.6);
     position: relative;
-    overflow: hidden;
+
+    /* important changes to prevent clipping */
+    overflow: auto;        /* allow scroll instead of chopping bottom of game */
     min-height: 60vh;
+    max-height: 100vh;     /* never exceed viewport height, so you get scroll instead of cut */
+
     display: flex;
     align-items: center;
     justify-content: center;
@@ -79,9 +86,13 @@
 
   #gameContainer {
     width: 960px;
-    height: 600px;
     max-width: 100%;
-    max-height: 70vh;
+
+    /* Unity wants a consistent canvas height, but we also give it a cap
+       so on smaller screens it can shrink and/or scroll instead of cut off */
+    height: 600px;
+    max-height: 80vh;
+
     margin: auto;
     background: #000;
   }
@@ -115,6 +126,24 @@
     border-radius: .5rem;
     margin-bottom: .4rem;
     border: 1px solid #1e293b;
+  }
+
+  .btn {
+    appearance: none;
+    background-color: #38bdf8;
+    color: #0f172a;
+    border: 0;
+    font-weight: 600;
+    font-size: .9rem;
+    border-radius: .5rem;
+    padding: .6rem .8rem;
+    cursor: pointer;
+    width: 100%;
+    text-align: center;
+    margin-top: .5rem;
+  }
+  .btn:active {
+    transform: scale(.98);
   }
 
   .panel {
@@ -151,31 +180,13 @@
     color: #f8fafc;
   }
 
-  .btn {
-    appearance: none;
-    background-color: #38bdf8;
-    color: #0f172a;
-    border: 0;
-    font-weight: 600;
-    font-size: .9rem;
-    border-radius: .5rem;
-    padding: .6rem .8rem;
-    cursor: pointer;
-    width: 100%;
-    text-align: center;
-    margin-top: .5rem;
-  }
-  .btn:active {
-    transform: scale(.98);
-  }
-
   /* QUIZ / SUBMIT OVERLAY */
   .overlay-bg {
     position: absolute;
     inset: 0;
-    background: rgba(15,23,42,.9); /* almost black */
+    background: rgba(15,23,42,.9); /* nearly black */
     color: #f8fafc;
-    display: none; /* toggled on with JS */
+    display: none; /* toggled on/off with JS */
     align-items: center;
     justify-content: center;
     padding: 1rem;
@@ -259,13 +270,19 @@
     outline: 2px solid #38bdf8;
   }
 
-  /* Small screens (Chromebooks, etc.) */
+  /* Small screens / Chromebooks */
   @media (max-width: 900px) {
     .layout-root {
       grid-template-columns: 1fr;
       grid-template-rows: auto auto;
       height: auto;
     }
+
+    .game-wrapper {
+      max-height: none;
+      min-height: 50vh;
+    }
+
     #gameContainer {
       max-width: 100%;
       max-height: 60vh;
@@ -283,10 +300,10 @@
     <!-- Unity game canvas will render here -->
     <div id="gameContainer"></div>
 
-    <!-- Overlay popup (quiz AND leaderboard submit reuse this container) -->
+    <!-- Overlay popup (quiz AND score submit reuse this container) -->
     <div class="overlay-bg" id="overlayBg">
       <div class="overlay-card" id="overlayCard">
-        <!-- JS will inject quiz UI or submit-score UI here -->
+        <!-- JS injects question UI or submit-score UI here -->
       </div>
     </div>
   </main>
@@ -319,7 +336,7 @@
           <tr><th>Name</th><th>Score</th></tr>
         </thead>
         <tbody id="leaderboardBody">
-          <!-- filled by JS -->
+          <!-- JS fills this -->
         </tbody>
       </table>
     </div>
@@ -331,8 +348,7 @@
   // ==================
   // 1. START THE GAME
   // ==================
-  // This assumes you did NOT rename the .json in Build/
-  // If your Build JSON file is a different name, update it here.
+  // If your JSON inside Build/ has a different filename, update it below.
   var gameInstance = UnityLoader.instantiate("gameContainer", "Build/SnowRider3D-gd-1.json", {
     onProgress: function (gameInstance, progress) {
       UnityProgress(gameInstance, progress);
@@ -621,7 +637,7 @@
         } else {
           btn.classList.add("wrong");
           resultMsg.textContent = "Not quite. No points this time.";
-          // mark correct answer too
+          // show correct answer too
           choiceButtons[qObj.answerIndex].classList.add("correct");
         }
 
@@ -645,7 +661,7 @@
     showQuiz();
   }, QUIZ_INTERVAL_MS);
 
-  // OPTIONAL immediate quiz for testing:
+  // If you want the quiz to appear immediately on load for testing, uncomment:
   // showQuiz();
 
   // =========================
@@ -682,7 +698,7 @@
         return;
       }
 
-      // Limit name length / redact last names if you want
+      // Trim for safety / privacy
       const shortName = nameVal.substring(0, 12);
 
       try {
