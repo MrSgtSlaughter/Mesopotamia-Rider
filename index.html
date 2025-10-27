@@ -6,12 +6,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>Mesopotamia Rider</title>
 
-<link rel="icon" href="TemplateData/favicon.ico" />
-<link rel="stylesheet" href="TemplateData/style.css" />
-<script src="TemplateData/UnityProgress.js"></script>
-<script src="Build/UnityLoader.js"></script>
-
-<!-- Firebase init -->
+<!-- Firebase setup -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
   import {
@@ -24,7 +19,7 @@
     getDocs
   } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
-  // YOUR FIREBASE CONFIG
+  // Your Firebase config
   const firebaseConfig = {
     apiKey: "AIzaSyBTq5Yhu0CC4T0J2pgDD0zyan3i1PicxOc",
     authDomain: "mesopotamia-rider-leaderboard.firebaseapp.com",
@@ -38,7 +33,7 @@
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
 
-  // expose to the non-module script below
+  // Hand this to the non-module script
   window._db = db;
   window._firestoreFns = { collection, addDoc, query, orderBy, limit, getDocs };
 </script>
@@ -53,43 +48,58 @@
 
   .layout-root {
     display: grid;
-    grid-template-columns: 1fr 320px; /* game big, sidebar skinny */
+    grid-template-columns: 1fr 320px;
     gap: 1rem;
     padding: 1rem;
     height: 100vh;
     box-sizing: border-box;
   }
 
-  /* LEFT: game container card */
+  /* LEFT: game wrapper */
   .game-wrapper {
     background-color: #1e293b;
     border-radius: 1rem;
     box-shadow: 0 20px 40px rgba(0,0,0,0.6);
     position: relative;
-
-    /* allow scroll if Unity canvas is taller than viewport */
-    overflow: auto;
+    overflow: hidden;
     min-height: 60vh;
     max-height: 100vh;
-
     display: flex;
     align-items: center;
     justify-content: center;
   }
 
-  #gameContainer {
+  /* The iframe that contains the Unity game */
+  #gameFrameWrapper {
+    position: relative;
     width: 960px;
     max-width: 100%;
-
     height: 600px;
     max-height: 80vh;
-
-    margin: auto;
     background: #000;
+    border-radius: .5rem;
+    overflow: hidden;
+    box-shadow: 0 20px 40px rgba(0,0,0,.8);
     transition: filter 0.15s ease;
   }
 
-  /* RIGHT: sidebar card */
+  #gameFrame {
+    width: 100%;
+    height: 100%;
+    border: 0;
+    display: block;
+  }
+
+  /* Dim layer over iframe (visual pause) */
+  #gameDimmer {
+    pointer-events: none; /* clicks still go through unless we flip it */
+    position: absolute;
+    inset: 0;
+    background: rgba(0,0,0,0);
+    transition: background 0.15s ease;
+  }
+
+  /* RIGHT: sidebar */
   .sidebar {
     background-color: #1e293b;
     border-radius: 1rem;
@@ -105,7 +115,7 @@
     margin: 0 0 .5rem;
     font-size: 1rem;
     font-weight: 600;
-    color: #38bdf8; /* cyan */
+    color: #38bdf8;
     letter-spacing: -0.03em;
   }
 
@@ -152,7 +162,7 @@
     margin: 0 0 .5rem;
     font-size: .9rem;
     font-weight: 500;
-    color: #facc15; /* yellow */
+    color: #facc15;
   }
 
   .leaderboard-table {
@@ -172,13 +182,13 @@
     color: #f8fafc;
   }
 
-  /* OVERLAY for quiz + score submit */
+  /* Overlay card for quiz / submit score */
   .overlay-bg {
-    position: absolute;
+    position: fixed; /* NOTE: fixed to whole window now */
     inset: 0;
-    background: rgba(15,23,42,.9); /* almost black */
+    background: rgba(15,23,42,.9);
     color: #f8fafc;
-    display: none;                /* turned on with JS */
+    display: none; /* toggled by JS */
     align-items: center;
     justify-content: center;
     padding: 1rem;
@@ -262,7 +272,6 @@
     outline: 2px solid #38bdf8;
   }
 
-  /* RESPONSIVE */
   @media (max-width: 900px) {
     .layout-root {
       grid-template-columns: 1fr;
@@ -275,8 +284,7 @@
       min-height: 50vh;
     }
 
-    #gameContainer {
-      max-width: 100%;
+    #gameFrameWrapper {
       max-height: 60vh;
     }
   }
@@ -286,19 +294,15 @@
 
 <div class="layout-root">
 
-  <!-- LEFT: GAME -->
+  <!-- LEFT: GAME IN ITS OWN IFRAME SANDBOX -->
   <main class="game-wrapper">
-    <div id="gameContainer"></div>
-
-    <!-- Overlay for quiz + submit score -->
-    <div class="overlay-bg" id="overlayBg">
-      <div class="overlay-card" id="overlayCard">
-        <!-- JS injects here -->
-      </div>
+    <div id="gameFrameWrapper">
+      <iframe id="gameFrame" src="game-frame.html" allow="gamepad *"></iframe>
+      <div id="gameDimmer"></div>
     </div>
   </main>
 
-  <!-- RIGHT: SIDEBAR -->
+  <!-- RIGHT: SIDEBAR / SCORE / LEADERBOARD -->
   <aside class="sidebar">
     <h2>Mesopotamia Rider</h2>
 
@@ -326,93 +330,56 @@
           <tr><th>Name</th><th>Score</th></tr>
         </thead>
         <tbody id="leaderboardBody">
-          <!-- filled in by JS -->
+          <!-- rows injected by JS -->
         </tbody>
       </table>
     </div>
   </aside>
+</div>
 
+<!-- GLOBAL OVERLAY (QUIZ + SUBMIT NAME) -->
+<div class="overlay-bg" id="overlayBg">
+  <div class="overlay-card" id="overlayCard">
+    <!-- injected -->
+  </div>
 </div>
 
 <script>
-  // =========================================================
-  // 1. UNITY GAME BOOT
-  // =========================================================
-  // Make sure this filename matches the .json in your Build/ folder.
-  // If it's different, fix it here.
-  var gameInstance = UnityLoader.instantiate(
-    "gameContainer",
-    "Build/SnowRider3D-gd-1.json",
-    {
-      onProgress: function (gameInstance, progress) {
-        UnityProgress(gameInstance, progress);
-      }
-    }
-  );
+  /**********************************************************
+   * CORE IDEA:
+   * - The Unity game lives in an iframe (gameFrame.html).
+   * - When we show a quiz or submit dialog:
+   *    1. We visually dim + pointer-block the iframe.
+   *    2. We BLUR the iframe so it stops getting keyboard focus.
+   *    3. We FOCUS the input in our overlay, so the kid can type.
+   *
+   * - When we close the overlay:
+   *    1. We hide overlay.
+   *    2. We UN-DIM and unblock the iframe.
+   *    3. We re-focus iframe so Unity controls come back.
+   *
+   * No global key interception. No fighting Unity's listeners.
+   * Browser focus does the work for us.
+   **********************************************************/
 
-  const gameDiv = document.getElementById("gameContainer");
+  const gameFrameWrapper = document.getElementById("gameFrameWrapper");
+  const gameFrame = document.getElementById("gameFrame");
+  const gameDimmer = document.getElementById("gameDimmer");
 
-  // overlayActive = true whenever quiz / submit popup is showing
-  let overlayActive = false;
+  const overlayBg = document.getElementById("overlayBg");
+  const overlayCard = document.getElementById("overlayCard");
 
-  // Dim game + block mouse clicks while overlay is up
-  function disableGame() {
-    gameDiv.style.pointerEvents = "none";
-    gameDiv.style.filter = "brightness(0.4)";
+  let quizPoints = 0;
+  let questionsCorrect = 0;
+  let questionsSeen = 0;
+
+  function updateStatsUI() {
+    document.getElementById("quizPoints").textContent = quizPoints;
+    document.getElementById("questionsCorrect").textContent = questionsCorrect;
+    document.getElementById("questionsSeen").textContent = questionsSeen;
   }
 
-  // Restore game controls after overlay closes
-  function enableGame() {
-    gameDiv.style.pointerEvents = "auto";
-    gameDiv.style.filter = "none";
-  }
-
-  // =========================================================
-  // 2. KEYBOARD CONTROL ARBITER (THIS IS THE FIX)
-  // =========================================================
-  // We ONLY block Unity's keys if:
-  // - overlay is open, AND
-  // - the user is NOT actively typing in an input inside the overlay.
-  //
-  // That way:
-  // - During quiz / submit popup, snowboarder can't keep playing (good)
-  // - When student is typing initials in <input>, keystrokes go to the box (good)
-  // - After popup closes, overlayActive = false, Unity gets keys again (good)
-  function eatKeysIfOverlay(e) {
-    if (!overlayActive) return; // no popup? let Unity get keys normally
-
-    const activeEl = document.activeElement;
-    const overlayCard = document.getElementById("overlayCard");
-
-    // Are we focused on an input or textarea INSIDE the overlay card?
-    const isTypingInInput =
-      activeEl &&
-      (activeEl.tagName === "INPUT" || activeEl.tagName === "TEXTAREA");
-
-    const typingInOverlayInput =
-      isTypingInInput && overlayCard.contains(activeEl);
-
-    if (typingInOverlayInput) {
-      // Student is typing initials. Let the browser handle the keys.
-      // DO NOT block or preventDefault.
-      return;
-    }
-
-    // Otherwise: quiz is up OR submit dialog is up,
-    // but we're not inside a text box.
-    // Block the event so Unity can't move.
-    e.stopPropagation();
-    e.preventDefault();
-  }
-
-  // capture=true so we intercept keys BEFORE Unity's own listeners
-  window.addEventListener("keydown", eatKeysIfOverlay, true);
-  window.addEventListener("keypress", eatKeysIfOverlay, true);
-  window.addEventListener("keyup", eatKeysIfOverlay, true);
-
-  // =========================================================
-  // 3. MESOPOTAMIA QUESTION BANK
-  // =========================================================
+  // ====== QUESTION BANK ======
   // answerIndex: 0 = A, 1 = B, 2 = C, 3 = D
   const questions = [
     {
@@ -617,34 +584,20 @@
     }
   ];
 
-  // =========================================================
-  // 4. SCORE STATE
-  // =========================================================
-  let quizPoints = 0;
-  let questionsCorrect = 0;
-  let questionsSeen = 0;
-
-  function updateStatsUI() {
-    document.getElementById("quizPoints").textContent = quizPoints;
-    document.getElementById("questionsCorrect").textContent = questionsCorrect;
-    document.getElementById("questionsSeen").textContent = questionsSeen;
-  }
-
-  // =========================================================
-  // 5. OVERLAY HELPERS
-  // =========================================================
-  function showOverlay(htmlInner) {
-    const overlayBg = document.getElementById("overlayBg");
-    const overlayCard = document.getElementById("overlayCard");
-
-    overlayCard.innerHTML = htmlInner;
+  // ====== OVERLAY CONTROL ======
+  function showOverlayCard(html) {
+    overlayCard.innerHTML = html;
     overlayBg.style.display = "flex";
 
-    // mark overlay as active BEFORE focusing
-    overlayActive = true;
-    disableGame(); // dim the game / block pointer
+    // 1. Dim and block the game iframe
+    gameDimmer.style.background = "rgba(0,0,0,0.5)";
+    gameDimmer.style.pointerEvents = "auto"; // block clicks on game
+    gameFrameWrapper.style.filter = "brightness(0.4)";
 
-    // focus the first input field so kids can immediately type initials
+    // 2. Blur iframe so it stops receiving keyboard events
+    gameFrame.blur();
+
+    // 3. Focus first input in overlay so typing works instantly
     const firstInput = overlayCard.querySelector("input,textarea");
     if (firstInput) {
       firstInput.focus();
@@ -652,34 +605,43 @@
     }
   }
 
-  function hideOverlay() {
-    const overlayBg = document.getElementById("overlayBg");
+  function hideOverlayCard() {
     overlayBg.style.display = "none";
 
-    // critical: turn this OFF so Unity gets keys again
-    overlayActive = false;
-    enableGame();
+    // Un-dim the game iframe, let it take input again
+    gameDimmer.style.background = "rgba(0,0,0,0)";
+    gameDimmer.style.pointerEvents = "none";
+    gameFrameWrapper.style.filter = "none";
+
+    // REFRESH game focus so Unity regains keyboard control
+    // (Some browsers need a tiny async tick to allow focusing iframe)
+    setTimeout(() => {
+      // try focusing the iframe's window
+      if (gameFrame.contentWindow && gameFrame.contentWindow.focus) {
+        gameFrame.contentWindow.focus();
+      }
+      // also focus the iframe element itself as fallback
+      gameFrame.focus();
+    }, 0);
   }
 
-  // =========================================================
-  // 6. QUIZ LOGIC
-  // =========================================================
+  // ====== QUIZ LOGIC ======
   const QUIZ_INTERVAL_MS = 45000; // ~45 seconds
 
-  function pickQuestion() {
-    return questions[Math.floor(Math.random() * questions.length)];
-  }
-
-  function showQuiz() {
-    const qObj = pickQuestion();
+  function askQuestion() {
+    const qObj = questions[Math.floor(Math.random() * questions.length)];
     questionsSeen++;
 
     let choicesHTML = "";
-    qObj.choices.forEach((c, idx) => {
-      choicesHTML += `<button class="choice-btn" data-choice="${idx}">${c}</button>`;
+    qObj.choices.forEach((choiceText, idx) => {
+      choicesHTML += `
+        <button class="choice-btn" data-choice="${idx}">
+          ${choiceText}
+        </button>
+      `;
     });
 
-    const quizHTML = `
+    const quizMarkup = `
       <h2>Mesopotamia Checkpoint</h2>
       <p class="prompt">${qObj.q}</p>
 
@@ -692,11 +654,11 @@
       <button class="btn" id="continueBtn" disabled>Continue</button>
     `;
 
-    showOverlay(quizHTML);
+    showOverlayCard(quizMarkup);
 
-    const choiceButtons = document.querySelectorAll(".choice-btn");
-    const resultMsg = document.getElementById("resultMsg");
-    const continueBtn = document.getElementById("continueBtn");
+    const choiceButtons = overlayCard.querySelectorAll(".choice-btn");
+    const resultMsg = overlayCard.querySelector("#resultMsg");
+    const continueBtn = overlayCard.querySelector("#continueBtn");
 
     let answered = false;
 
@@ -714,14 +676,11 @@
         } else {
           btn.classList.add("wrong");
           resultMsg.textContent = "Not quite. No points this time.";
-          // show which was right
           choiceButtons[qObj.answerIndex].classList.add("correct");
         }
 
-        // lock all answer buttons
-        choiceButtons.forEach(b => {
-          b.disabled = true;
-        });
+        // lock all choices so they can't click again
+        choiceButtons.forEach(b => (b.disabled = true));
 
         updateStatsUI();
         continueBtn.disabled = false;
@@ -729,21 +688,18 @@
     });
 
     continueBtn.addEventListener("click", () => {
-      hideOverlay(); // VERY IMPORTANT: releases controls
+      hideOverlayCard();
     });
   }
 
-  // Ask a quiz every interval
-  const quizTimer = setInterval(showQuiz, QUIZ_INTERVAL_MS);
+  // fire quiz every interval
+  setInterval(askQuestion, QUIZ_INTERVAL_MS);
+  // optional test: ask immediately
+  // askQuestion();
 
-  // For testing, you can force the first quiz right away:
-  // showQuiz();
-
-  // =========================================================
-  // 7. LEADERBOARD SAVE / LOAD (FIRESTORE)
-  // =========================================================
-  async function saveScoreFlow() {
-    const saveHTML = `
+  // ====== LEADERBOARD SAVE FLOW ======
+  async function openSubmitScore() {
+    const submitMarkup = `
       <h2>Submit Score</h2>
       <p class="prompt">Enter your initials or first name to post your score to the class leaderboard.</p>
 
@@ -762,25 +718,24 @@
       <button class="btn" id="cancelSubmitBtn" style="margin-top:.5rem; background:#334155; color:#f8fafc;">Cancel</button>
     `;
 
-    showOverlay(saveHTML);
+    showOverlayCard(submitMarkup);
 
-    const cancelBtn = document.getElementById("cancelSubmitBtn");
+    const cancelBtn = overlayCard.querySelector("#cancelSubmitBtn");
+    const submitBtn = overlayCard.querySelector("#submitScoreBtn");
+
     cancelBtn.addEventListener("click", () => {
-      hideOverlay(); // releases controls
+      hideOverlayCard();
     });
 
-    const submitBtn = document.getElementById("submitScoreBtn");
     submitBtn.addEventListener("click", async () => {
-      const nameField = document.getElementById("playerNameInput");
-      const msgEl = document.getElementById("submitMsg");
+      const nameField = overlayCard.querySelector("#playerNameInput");
+      const msgEl = overlayCard.querySelector("#submitMsg");
 
       const rawName = nameField.value.trim();
       if (!rawName) {
         msgEl.textContent = "Please enter a name.";
         return;
       }
-
-      // Truncate for privacy
       const shortName = rawName.substring(0, 12);
 
       try {
@@ -837,11 +792,12 @@
       .replace(/'/g,"&#039;");
   }
 
-  // hook up sidebar button
-  document.getElementById("saveScoreBtn").addEventListener("click", saveScoreFlow);
+  // Hook up the "Submit Score" button in sidebar
+  document.getElementById("saveScoreBtn").addEventListener("click", openSubmitScore);
 
-  // load leaderboard now
+  // Load leaderboard right away
   loadLeaderboard();
+
 </script>
 
 </body>
