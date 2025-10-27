@@ -11,13 +11,9 @@
 <script src="TemplateData/UnityProgress.js"></script>
 <script src="Build/UnityLoader.js"></script>
 
-<!-- Firebase (modular CDN imports) -->
+<!-- Firebase (CDN modules) -->
 <script type="module">
-  // 1. Go to Firebase Console -> Project Settings -> Your Apps -> Web App
-  // 2. Copy your config into firebaseConfig below.
-  // 3. You must also set up Firestore in test mode or with rules that allow add/read
-  //    from mesoLeaderboard if you're just doing classroom use.
-
+  // We import the Firebase pieces we actually use:
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
   import {
     getFirestore,
@@ -29,19 +25,22 @@
     getDocs
   } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
+  // Your Firebase project config (the one you pasted for me)
   const firebaseConfig = {
-    apiKey: "YOUR_KEY_HERE",
-    authDomain: "YOUR_PROJECT.firebaseapp.com",
-    projectId: "YOUR_PROJECT_ID",
-    storageBucket: "YOUR_PROJECT.appspot.com",
-    messagingSenderId: "SENDER_ID",
-    appId: "APP_ID"
+    apiKey: "AIzaSyBTq5Yhu0CC4T0J2pgDD0zyan3i1PicxOc",
+    authDomain: "mesopotamia-rider-leaderboard.firebaseapp.com",
+    projectId: "mesopotamia-rider-leaderboard",
+    storageBucket: "mesopotamia-rider-leaderboard.firebasestorage.app",
+    messagingSenderId: "469063803329",
+    appId: "1:469063803329:web:823d63cb02bf5096d04f40",
+    measurementId: "G-R7YH8DDBE0"
   };
 
+  // Start Firebase
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
 
-  // Expose Firestore handles to the non-module script below
+  // Expose Firestore APIs to the rest of the page (the non-module script below)
   window._db = db;
   window._firestoreFns = { collection, addDoc, query, orderBy, limit, getDocs };
 </script>
@@ -74,10 +73,10 @@
     box-shadow: 0 20px 40px rgba(0,0,0,0.6);
     position: relative;
 
-    /* important changes to prevent clipping */
-    overflow: auto;        /* allow scroll instead of chopping bottom of game */
+    /* allow scroll instead of clipping the bottom of the Unity canvas */
+    overflow: auto;
     min-height: 60vh;
-    max-height: 100vh;     /* never exceed viewport height, so you get scroll instead of cut */
+    max-height: 100vh;
 
     display: flex;
     align-items: center;
@@ -88,8 +87,7 @@
     width: 960px;
     max-width: 100%;
 
-    /* Unity wants a consistent canvas height, but we also give it a cap
-       so on smaller screens it can shrink and/or scroll instead of cut off */
+    /* Unity wants a stable size, but we'll cap it so it can't explode off-screen */
     height: 600px;
     max-height: 80vh;
 
@@ -349,6 +347,7 @@
   // 1. START THE GAME
   // ==================
   // If your JSON inside Build/ has a different filename, update it below.
+  // This must match the .json file inside your Build/ folder.
   var gameInstance = UnityLoader.instantiate("gameContainer", "Build/SnowRider3D-gd-1.json", {
     onProgress: function (gameInstance, progress) {
       UnityProgress(gameInstance, progress);
@@ -569,7 +568,7 @@
   let questionsCorrect = 0;
   let questionsSeen = 0;
 
-  // how often to interrupt gameplay (ms)
+  // Time between quiz popups (ms)
   const QUIZ_INTERVAL_MS = 45000; // ~45 seconds
 
   function updateStatsUI() {
@@ -594,7 +593,7 @@
     overlayBg.style.display = "none";
   }
 
-  // Show a multiple-choice quiz, lock play until they answer
+  // Show quiz popup over the game and lock play until they answer
   function showQuiz() {
     const qObj = pickQuestion();
     questionsSeen++;
@@ -629,6 +628,7 @@
         answered = true;
 
         const picked = parseInt(btn.dataset.choice, 10);
+
         if (picked === qObj.answerIndex) {
           btn.classList.add("correct");
           resultMsg.textContent = "Correct! +100 points.";
@@ -637,11 +637,11 @@
         } else {
           btn.classList.add("wrong");
           resultMsg.textContent = "Not quite. No points this time.";
-          // show correct answer too
+          // Show which one WAS correct
           choiceButtons[qObj.answerIndex].classList.add("correct");
         }
 
-        // lock all buttons
+        // Lock all buttons so they can't spam
         choiceButtons.forEach(b => {
           b.disabled = true;
         });
@@ -656,18 +656,20 @@
     });
   }
 
-  // pop a quiz every X ms
+  // Pop a quiz every interval
   let quizTimer = setInterval(() => {
     showQuiz();
   }, QUIZ_INTERVAL_MS);
 
-  // If you want the quiz to appear immediately on load for testing, uncomment:
+  // If you want a quiz immediately when they load the page (for testing),
+  // uncomment this line:
   // showQuiz();
 
   // =========================
-  // 4. LEADERBOARD / FIREBASE
+  // 4. LEADERBOARD / FIRESTORE
   // =========================
   async function saveScoreFlow() {
+    // Build the submit-score popup UI
     const saveHTML = `
       <h2>Submit Score</h2>
       <p class="prompt">Enter your initials or first name to post your score to the class leaderboard.</p>
@@ -698,13 +700,14 @@
         return;
       }
 
-      // Trim for safety / privacy
+      // Safety: trim name to 12 chars, don't store last names
       const shortName = nameVal.substring(0, 12);
 
       try {
         const db = window._db;
         const { collection, addDoc } = window._firestoreFns;
 
+        // Add a document like { name: "Jay", score: 300, ts: 1729999999999 }
         await addDoc(collection(db, "mesoLeaderboard"), {
           name: shortName,
           score: quizPoints,
@@ -725,6 +728,7 @@
       const db = window._db;
       const { collection, query, orderBy, limit, getDocs } = window._firestoreFns;
 
+      // Top 10 scores, highest first
       const q = query(
         collection(db, "mesoLeaderboard"),
         orderBy("score", "desc"),
@@ -755,7 +759,10 @@
       .replace(/'/g,"&#039;");
   }
 
+  // Hook up the "Submit Score" button in the sidebar
   document.getElementById("saveScoreBtn").addEventListener("click", saveScoreFlow);
+
+  // Fill the leaderboard when the page first loads
   loadLeaderboard();
 </script>
 
