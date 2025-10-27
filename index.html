@@ -11,9 +11,8 @@
 <script src="TemplateData/UnityProgress.js"></script>
 <script src="Build/UnityLoader.js"></script>
 
-<!-- Firebase -->
+<!-- Firebase init -->
 <script type="module">
-  // bring in firebase pieces from CDN
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
   import {
     getFirestore,
@@ -25,7 +24,7 @@
     getDocs
   } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
-  // your Firebase config
+  // Your Firebase config (class leaderboard project)
   const firebaseConfig = {
     apiKey: "AIzaSyBTq5Yhu0CC4T0J2pgDD0zyan3i1PicxOc",
     authDomain: "mesopotamia-rider-leaderboard.firebaseapp.com",
@@ -36,17 +35,16 @@
     measurementId: "G-R7YH8DDBE0"
   };
 
-  // init firebase + firestore
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
 
-  // expose for the non-module script below
+  // make these available to normal script below
   window._db = db;
   window._firestoreFns = { collection, addDoc, query, orderBy, limit, getDocs };
 </script>
 
 <style>
-  /* ========== THEME / LAYOUT ========== */
+  /* ====== Layout / Theme ====== */
 
   body {
     margin: 0;
@@ -57,21 +55,21 @@
 
   .layout-root {
     display: grid;
-    grid-template-columns: 1fr 320px; /* big game, skinny sidebar */
+    grid-template-columns: 1fr 320px; /* game big, sidebar narrow */
     gap: 1rem;
     padding: 1rem;
     height: 100vh;
     box-sizing: border-box;
   }
 
-  /* LEFT SIDE: GAME WRAPPER */
+  /* LEFT: game area card */
   .game-wrapper {
     background-color: #1e293b;
     border-radius: 1rem;
     box-shadow: 0 20px 40px rgba(0,0,0,0.6);
     position: relative;
 
-    /* important for not cutting off the Unity canvas */
+    /* IMPORTANT: don't clip the bottom of Unity game */
     overflow: auto;
     min-height: 60vh;
     max-height: 100vh;
@@ -85,17 +83,15 @@
     width: 960px;
     max-width: 100%;
 
-    /* Unity wants a consistent canvas size,
-       but we also cap it so it doesn't overflow small screens */
-    height: 600px;
-    max-height: 80vh;
+    height: 600px;    /* target size */
+    max-height: 80vh; /* shrink if screen is short */
 
     margin: auto;
     background: #000;
     transition: filter 0.15s ease;
   }
 
-  /* RIGHT SIDE: SIDEBAR */
+  /* RIGHT: sidebar card */
   .sidebar {
     background-color: #1e293b;
     border-radius: 1rem;
@@ -158,7 +154,7 @@
     margin: 0 0 .5rem;
     font-size: .9rem;
     font-weight: 500;
-    color: #facc15; /* yellow */
+    color: #facc15; /* yellow accent */
   }
 
   .leaderboard-table {
@@ -178,13 +174,13 @@
     color: #f8fafc;
   }
 
-  /* OVERLAY (quiz + submit score) */
+  /* ====== Overlay popup (quiz + submit score) ====== */
   .overlay-bg {
     position: absolute;
     inset: 0;
-    background: rgba(15,23,42,.9); /* nearly black */
+    background: rgba(15,23,42,.9); /* almost black */
     color: #f8fafc;
-    display: none; /* toggled on/off in JS */
+    display: none; /* we'll set to flex when active */
     align-items: center;
     justify-content: center;
     padding: 1rem;
@@ -269,7 +265,7 @@
     outline: 2px solid #38bdf8;
   }
 
-  /* Small screens / Chromebooks */
+  /* ====== Small screens / Chromebooks ====== */
   @media (max-width: 900px) {
     .layout-root {
       grid-template-columns: 1fr;
@@ -293,20 +289,19 @@
 
 <div class="layout-root">
 
-  <!-- LEFT: GAME AREA -->
+  <!-- LEFT side: Unity game -->
   <main class="game-wrapper">
-    <!-- Unity game canvas goes here -->
     <div id="gameContainer"></div>
 
-    <!-- Overlay for quiz / submit score -->
+    <!-- Overlay for quiz + score submit -->
     <div class="overlay-bg" id="overlayBg">
       <div class="overlay-card" id="overlayCard">
-        <!-- JS injects quiz or submit-score UI in here -->
+        <!-- JS fills this -->
       </div>
     </div>
   </main>
 
-  <!-- RIGHT: SIDEBAR -->
+  <!-- RIGHT side: sidebar -->
   <aside class="sidebar">
     <h2>Mesopotamia Rider</h2>
 
@@ -334,7 +329,7 @@
           <tr><th>Name</th><th>Score</th></tr>
         </thead>
         <tbody id="leaderboardBody">
-          <!-- filled by JS -->
+          <!-- leaderboard rows go here -->
         </tbody>
       </table>
     </div>
@@ -344,34 +339,55 @@
 
 <script>
   // =========================================================
-  // 1. START UNITY GAME
+  // 1. Start Unity game
   // =========================================================
-  // Make sure this matches the .json file in your Build/ folder
-  var gameInstance = UnityLoader.instantiate("gameContainer", "Build/SnowRider3D-gd-1.json", {
-    onProgress: function (gameInstance, progress) {
-      UnityProgress(gameInstance, progress);
+  // Make sure this matches your actual .json build filename.
+  // If your Build folder has a different JSON, change it here.
+  var gameInstance = UnityLoader.instantiate(
+    "gameContainer",
+    "Build/SnowRider3D-gd-1.json",
+    {
+      onProgress: function (gameInstance, progress) {
+        UnityProgress(gameInstance, progress);
+      }
     }
-  });
+  );
 
-  // We'll "pause" input by messing with the container div
+  // We'll control "pause" look + input blocking using this div
   const gameDiv = document.getElementById("gameContainer");
 
+  // Overlay state flag so we know if a popup is open
+  let overlayActive = false;
+
   function disableGame() {
-    // stop input going to the game
+    // Kill mouse/touch input to game
     gameDiv.style.pointerEvents = "none";
-    // dim so they SEE it's paused
+    // Dim so it looks paused
     gameDiv.style.filter = "brightness(0.4)";
   }
 
   function enableGame() {
-    // allow input again
+    // Bring input back
     gameDiv.style.pointerEvents = "auto";
-    // restore look
+    // Restore brightness
     gameDiv.style.filter = "none";
   }
 
+  // Kill Unity's keyboard control while overlay is up.
+  function eatKeysIfOverlay(e) {
+    if (overlayActive) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+  }
+
+  // Capture key events BEFORE Unity gets them
+  window.addEventListener("keydown", eatKeysIfOverlay, true);
+  window.addEventListener("keypress", eatKeysIfOverlay, true);
+  window.addEventListener("keyup", eatKeysIfOverlay, true);
+
   // =========================================================
-  // 2. MESOPOTAMIA QUESTIONS (GRADE 7)
+  // 2. Mesopotamia question bank (Grade 7)
   // =========================================================
   // answerIndex: 0 = A, 1 = B, 2 = C, 3 = D
   const questions = [
@@ -578,7 +594,7 @@
   ];
 
   // =========================================================
-  // 3. QUIZ STATS
+  // 3. Quiz stats
   // =========================================================
   let quizPoints = 0;
   let questionsCorrect = 0;
@@ -591,21 +607,26 @@
   }
 
   // =========================================================
-  // 4. OVERLAY HELPERS
+  // 4. Overlay helpers (show/hide popup)
   // =========================================================
   function showOverlay(htmlInner) {
     const overlayBg = document.getElementById("overlayBg");
     const overlayCard = document.getElementById("overlayCard");
+
     overlayCard.innerHTML = htmlInner;
     overlayBg.style.display = "flex";
 
-    // "pause" game visually + kill input
+    // mark that popup is active
+    overlayActive = true;
+
+    // pause visuals + block mouse
     disableGame();
 
-    // if there's an input, focus it so keyboard works
+    // focus first input so keyboard typing goes THERE not to Unity
     const firstInput = overlayCard.querySelector("input");
     if (firstInput) {
       firstInput.focus();
+      firstInput.select?.();
     }
   }
 
@@ -613,12 +634,15 @@
     const overlayBg = document.getElementById("overlayBg");
     overlayBg.style.display = "none";
 
+    // popup gone
+    overlayActive = false;
+
     // resume game
     enableGame();
   }
 
   // =========================================================
-  // 5. QUIZ POPUP LOGIC
+  // 5. Quiz popup logic
   // =========================================================
   const QUIZ_INTERVAL_MS = 45000; // ~45 seconds
 
@@ -638,10 +662,13 @@
     const quizHTML = `
       <h2>Mesopotamia Checkpoint</h2>
       <p class="prompt">${qObj.q}</p>
+
       <div class="choices">
         ${choicesHTML}
       </div>
+
       <div class="result-msg" id="resultMsg"></div>
+
       <button class="btn" id="continueBtn" disabled>Continue</button>
     `;
 
@@ -668,7 +695,7 @@
         } else {
           btn.classList.add("wrong");
           resultMsg.textContent = "Not quite. No points this time.";
-          // mark correct
+          // mark the right one
           choiceButtons[qObj.answerIndex].classList.add("correct");
         }
 
@@ -687,14 +714,14 @@
     });
   }
 
-  // ask a question every X ms
+  // ask a quiz every interval
   const quizTimer = setInterval(showQuiz, QUIZ_INTERVAL_MS);
 
-  // uncomment this if you want a quiz INSTANTLY on load for testing:
+  // For testing only, you can uncomment this so the first quiz shows immediately:
   // showQuiz();
 
   // =========================================================
-  // 6. LEADERBOARD / FIRESTORE
+  // 6. Leaderboard submit + load
   // =========================================================
   async function saveScoreFlow() {
     const saveHTML = `
@@ -702,7 +729,7 @@
       <p class="prompt">Enter your initials or first name to post your score to the class leaderboard.</p>
 
       <div class="name-input-row">
-        <input id="playerNameInput" maxlength="12" placeholder="Your name/initials"/>
+        <input id="playerNameInput" maxlength="12" placeholder="Your name/initials" />
       </div>
 
       <div class="stat-row" style="margin-bottom:1rem; background:#1e293b; border:1px solid #334155; display:flex; justify-content:space-between;">
@@ -731,13 +758,14 @@
         return;
       }
 
-      // keep just first name / initials, 12 chars max
+      // keep first name / initials, max 12 chars
       const shortName = nameVal.substring(0, 12);
 
       try {
         const db = window._db;
         const { collection, addDoc } = window._firestoreFns;
 
+        // write to Firestore
         await addDoc(collection(db, "mesoLeaderboard"), {
           name: shortName,
           score: quizPoints,
@@ -758,7 +786,7 @@
       const db = window._db;
       const { collection, query, orderBy, limit, getDocs } = window._firestoreFns;
 
-      // top 10 scores, highest first
+      // top 10, highest score first
       const q = query(
         collection(db, "mesoLeaderboard"),
         orderBy("score", "desc"),
@@ -766,6 +794,7 @@
       );
 
       const snap = await getDocs(q);
+
       const rows = [];
       snap.forEach(doc => {
         const data = doc.data();
@@ -789,10 +818,10 @@
       .replace(/'/g,"&#039;");
   }
 
-  // hook the "Submit Score" button in the sidebar
+  // hook the sidebar button
   document.getElementById("saveScoreBtn").addEventListener("click", saveScoreFlow);
 
-  // load leaderboard when page opens
+  // load leaderboard on page load
   loadLeaderboard();
 </script>
 
