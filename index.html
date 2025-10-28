@@ -6,12 +6,13 @@
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>Mesopotamia Rider</title>
 
+<!-- Unity build files MUST already be in /Build and /TemplateData for this to work -->
 <link rel="icon" href="TemplateData/favicon.ico" />
 <link rel="stylesheet" href="TemplateData/style.css" />
 <script src="TemplateData/UnityProgress.js"></script>
 <script src="Build/UnityLoader.js"></script>
 
-<!-- Firebase init -->
+<!-- Firebase: we load Firestore and expose it to normal JS -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
   import {
@@ -35,15 +36,17 @@
     measurementId: "G-R7YH8DDBE0"
   };
 
+  // Start Firebase
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
 
-  // expose to the non-module script below
+  // Hand Firestore to the rest of the page (non-module script below)
   window._db = db;
   window._firestoreFns = { collection, addDoc, query, orderBy, limit, getDocs };
 </script>
 
 <style>
+  /* ---- page layout ---- */
   body {
     margin: 0;
     background-color: #0f172a; /* dark navy */
@@ -60,14 +63,14 @@
     box-sizing: border-box;
   }
 
-  /* LEFT: game container card */
+  /* ---- left side: game box ---- */
   .game-wrapper {
     background-color: #1e293b;
     border-radius: 1rem;
     box-shadow: 0 20px 40px rgba(0,0,0,0.6);
     position: relative;
 
-    /* allow scroll if Unity canvas is taller than viewport */
+    /* scroll if Unity canvas taller than screen */
     overflow: auto;
     min-height: 60vh;
     max-height: 100vh;
@@ -89,7 +92,7 @@
     transition: filter 0.15s ease;
   }
 
-  /* RIGHT: sidebar card */
+  /* ---- right side: sidebar ---- */
   .sidebar {
     background-color: #1e293b;
     border-radius: 1rem;
@@ -172,13 +175,13 @@
     color: #f8fafc;
   }
 
-  /* OVERLAY for quiz + score submit */
+  /* ---- overlay (quiz + submit score box that pops up over game) ---- */
   .overlay-bg {
     position: absolute;
     inset: 0;
-    background: rgba(15,23,42,.9); /* almost black */
+    background: rgba(15,23,42,.9); /* almost black see-through */
     color: #f8fafc;
-    display: none;                /* turned on with JS */
+    display: none;                /* we turn this to flex with JS */
     align-items: center;
     justify-content: center;
     padding: 1rem;
@@ -243,26 +246,7 @@
     font-weight: 500;
   }
 
-  .name-input-row {
-    display: flex;
-    gap: .5rem;
-    margin-bottom: 1rem;
-  }
-
-  .name-input-row input {
-    flex: 1;
-    border-radius: .5rem;
-    border: 2px solid #334155;
-    background: #0f172a;
-    padding: .6rem .75rem;
-    color: #f8fafc;
-    font-size: .9rem;
-  }
-  .name-input-row input:focus {
-    outline: 2px solid #38bdf8;
-  }
-
-  /* RESPONSIVE */
+  /* Responsive for smaller screens */
   @media (max-width: 900px) {
     .layout-root {
       grid-template-columns: 1fr;
@@ -285,20 +269,19 @@
 <body>
 
 <div class="layout-root">
-
-  <!-- LEFT: GAME -->
+  <!-- LEFT SIDE: GAME -->
   <main class="game-wrapper">
     <div id="gameContainer"></div>
 
-    <!-- Overlay for quiz + submit score -->
+    <!-- this is our popup for quiz AND score submit -->
     <div class="overlay-bg" id="overlayBg">
       <div class="overlay-card" id="overlayCard">
-        <!-- JS injects here -->
+        <!-- we fill this with JavaScript when needed -->
       </div>
     </div>
   </main>
 
-  <!-- RIGHT: SIDEBAR -->
+  <!-- RIGHT SIDE: CLASS STATS + LEADERBOARD -->
   <aside class="sidebar">
     <h2>Mesopotamia Rider</h2>
 
@@ -326,20 +309,21 @@
           <tr><th>Name</th><th>Score</th></tr>
         </thead>
         <tbody id="leaderboardBody">
-          <!-- filled in by JS -->
+          <!-- we'll load rows from Firestore -->
         </tbody>
       </table>
     </div>
   </aside>
-
 </div>
 
 <script>
-  // =========================================================
-  // 1. UNITY GAME BOOT
-  // =========================================================
-  // Make sure this filename matches the .json in your Build/ folder.
-  // If it's different, fix it here.
+  /*********************************************************
+   * PART 1. START THE UNITY GAME
+   *********************************************************/
+  // This loads your Unity WebGL build into the div #gameContainer.
+  // IMPORTANT:
+  // - "Build/SnowRider3D-gd-1.json" must match the .json file actually in your Build folder.
+  //   If your file name is different, fix it here.
   var gameInstance = UnityLoader.instantiate(
     "gameContainer",
     "Build/SnowRider3D-gd-1.json",
@@ -352,68 +336,45 @@
 
   const gameDiv = document.getElementById("gameContainer");
 
-  // overlayActive = true whenever quiz / submit popup is showing
+  // overlayActive = true means popup is on screen.
   let overlayActive = false;
 
-  // Dim game + block mouse clicks while overlay is up
+  // Dim/disconnect game when overlay is open
   function disableGame() {
+    // stop clicking the game
     gameDiv.style.pointerEvents = "none";
+    // darken it so it "looks paused"
     gameDiv.style.filter = "brightness(0.4)";
   }
 
-  // Restore game controls after overlay closes
+  // Re-enable game after popup
   function enableGame() {
     gameDiv.style.pointerEvents = "auto";
     gameDiv.style.filter = "none";
   }
 
-  // =========================================================
-  // 2. KEYBOARD CONTROL ARBITER (THIS IS THE FIX)
-  // =========================================================
-  // We ONLY block Unity's keys if:
-  // - overlay is open, AND
-  // - the user is NOT actively typing in an input inside the overlay.
-  //
-  // That way:
-  // - During quiz / submit popup, snowboarder can't keep playing (good)
-  // - When student is typing initials in <input>, keystrokes go to the box (good)
-  // - After popup closes, overlayActive = false, Unity gets keys again (good)
+  /*********************************************************
+   * PART 2. STOP GAME CONTROLS DURING POPUP
+   *********************************************************/
+  // When overlayActive is true, we block Unity from seeing keys.
+  // We DON'T let kids type anything from the real keyboard anyway,
+  // so now we can just HARD BLOCK all keys during popup.
   function eatKeysIfOverlay(e) {
-    if (!overlayActive) return; // no popup? let Unity get keys normally
-
-    const activeEl = document.activeElement;
-    const overlayCard = document.getElementById("overlayCard");
-
-    // Are we focused on an input or textarea INSIDE the overlay card?
-    const isTypingInInput =
-      activeEl &&
-      (activeEl.tagName === "INPUT" || activeEl.tagName === "TEXTAREA");
-
-    const typingInOverlayInput =
-      isTypingInInput && overlayCard.contains(activeEl);
-
-    if (typingInOverlayInput) {
-      // Student is typing initials. Let the browser handle the keys.
-      // DO NOT block or preventDefault.
-      return;
-    }
-
-    // Otherwise: quiz is up OR submit dialog is up,
-    // but we're not inside a text box.
-    // Block the event so Unity can't move.
+    if (!overlayActive) return;
     e.stopPropagation();
     e.preventDefault();
   }
 
-  // capture=true so we intercept keys BEFORE Unity's own listeners
+  // capture=true means we grab the key BEFORE Unity does
   window.addEventListener("keydown", eatKeysIfOverlay, true);
   window.addEventListener("keypress", eatKeysIfOverlay, true);
   window.addEventListener("keyup", eatKeysIfOverlay, true);
 
-  // =========================================================
-  // 3. MESOPOTAMIA QUESTION BANK
-  // =========================================================
-  // answerIndex: 0 = A, 1 = B, 2 = C, 3 = D
+  /*********************************************************
+   * PART 3. QUIZ QUESTIONS (Mesopotamia content)
+   *********************************************************/
+
+  // answerIndex: 0 = first answer, 1 = second, etc.
   const questions = [
     {
       q: "What does the word \"Mesopotamia\" mean?",
@@ -617,9 +578,9 @@
     }
   ];
 
-  // =========================================================
-  // 4. SCORE STATE
-  // =========================================================
+  /*********************************************************
+   * PART 4. SCORE STATE + UI
+   *********************************************************/
   let quizPoints = 0;
   let questionsCorrect = 0;
   let questionsSeen = 0;
@@ -630,55 +591,45 @@
     document.getElementById("questionsSeen").textContent = questionsSeen;
   }
 
-  // =========================================================
-  // 5. OVERLAY HELPERS
-  // =========================================================
-  function showOverlay(htmlInner) {
+  /*********************************************************
+   * PART 5. OVERLAY HELPERS
+   *********************************************************/
+  function showOverlay(innerHTML) {
     const overlayBg = document.getElementById("overlayBg");
     const overlayCard = document.getElementById("overlayCard");
 
-    overlayCard.innerHTML = htmlInner;
+    overlayCard.innerHTML = innerHTML;
     overlayBg.style.display = "flex";
 
-    // mark overlay as active BEFORE focusing
-    overlayActive = true;
-    disableGame(); // dim the game / block pointer
-
-    // focus the first input field so kids can immediately type initials
-    const firstInput = overlayCard.querySelector("input,textarea");
-    if (firstInput) {
-      firstInput.focus();
-      if (firstInput.select) firstInput.select();
-    }
+    overlayActive = true;   // IMPORTANT: block Unity keys
+    disableGame();          // darken + block clicks on game
   }
 
   function hideOverlay() {
     const overlayBg = document.getElementById("overlayBg");
     overlayBg.style.display = "none";
 
-    // critical: turn this OFF so Unity gets keys again
-    overlayActive = false;
-    enableGame();
+    overlayActive = false;  // let Unity get keys again
+    enableGame();           // undim game
   }
 
-  // =========================================================
-  // 6. QUIZ LOGIC
-  // =========================================================
-  const QUIZ_INTERVAL_MS = 45000; // ~45 seconds
-
-  function pickQuestion() {
-    return questions[Math.floor(Math.random() * questions.length)];
-  }
+  /*********************************************************
+   * PART 6. QUIZ POPUP
+   *********************************************************/
+  const QUIZ_INTERVAL_MS = 45000; // about every 45 seconds
 
   function showQuiz() {
-    const qObj = pickQuestion();
+    // pick a random question
+    const qObj = questions[Math.floor(Math.random() * questions.length)];
     questionsSeen++;
 
+    // build answer buttons
     let choicesHTML = "";
-    qObj.choices.forEach((c, idx) => {
-      choicesHTML += `<button class="choice-btn" data-choice="${idx}">${c}</button>`;
+    qObj.choices.forEach((text, idx) => {
+      choicesHTML += `<button class="choice-btn" data-choice="${idx}">${text}</button>`;
     });
 
+    // what the overlay looks like
     const quizHTML = `
       <h2>Mesopotamia Checkpoint</h2>
       <p class="prompt">${qObj.q}</p>
@@ -693,6 +644,7 @@
     `;
 
     showOverlay(quizHTML);
+    updateStatsUI();
 
     const choiceButtons = document.querySelectorAll(".choice-btn");
     const resultMsg = document.getElementById("resultMsg");
@@ -705,8 +657,10 @@
         if (answered) return;
         answered = true;
 
-        const picked = parseInt(btn.dataset.choice, 10);
-        if (picked === qObj.answerIndex) {
+        const pickedIndex = parseInt(btn.dataset.choice, 10);
+
+        // mark picked + correct answer
+        if (pickedIndex === qObj.answerIndex) {
           btn.classList.add("correct");
           resultMsg.textContent = "Correct! +100 points.";
           quizPoints += 100;
@@ -714,14 +668,12 @@
         } else {
           btn.classList.add("wrong");
           resultMsg.textContent = "Not quite. No points this time.";
-          // show which was right
+          // highlight right answer
           choiceButtons[qObj.answerIndex].classList.add("correct");
         }
 
-        // lock all answer buttons
-        choiceButtons.forEach(b => {
-          b.disabled = true;
-        });
+        // lock all answers after one click
+        choiceButtons.forEach(b => { b.disabled = true; });
 
         updateStatsUI();
         continueBtn.disabled = false;
@@ -729,79 +681,18 @@
     });
 
     continueBtn.addEventListener("click", () => {
-      hideOverlay(); // VERY IMPORTANT: releases controls
+      hideOverlay(); // this gives the game controls back
     });
   }
 
-  // Ask a quiz every interval
+  // ask quiz every 45s
   const quizTimer = setInterval(showQuiz, QUIZ_INTERVAL_MS);
-
-  // For testing, you can force the first quiz right away:
+  // for testing, you can force a quiz immediately:
   // showQuiz();
 
-  // =========================================================
-  // 7. LEADERBOARD SAVE / LOAD (FIRESTORE)
-  // =========================================================
-  async function saveScoreFlow() {
-    const saveHTML = `
-      <h2>Submit Score</h2>
-      <p class="prompt">Enter your initials or first name to post your score to the class leaderboard.</p>
-
-      <div class="name-input-row">
-        <input id="playerNameInput" maxlength="12" placeholder="Your name/initials" />
-      </div>
-
-      <div class="stat-row" style="margin-bottom:1rem; background:#1e293b; border:1px solid #334155; display:flex; justify-content:space-between;">
-        <span>Total Quiz Points</span>
-        <strong>${quizPoints}</strong>
-      </div>
-
-      <div class="result-msg" id="submitMsg"></div>
-
-      <button class="btn" id="submitScoreBtn">Submit</button>
-      <button class="btn" id="cancelSubmitBtn" style="margin-top:.5rem; background:#334155; color:#f8fafc;">Cancel</button>
-    `;
-
-    showOverlay(saveHTML);
-
-    const cancelBtn = document.getElementById("cancelSubmitBtn");
-    cancelBtn.addEventListener("click", () => {
-      hideOverlay(); // releases controls
-    });
-
-    const submitBtn = document.getElementById("submitScoreBtn");
-    submitBtn.addEventListener("click", async () => {
-      const nameField = document.getElementById("playerNameInput");
-      const msgEl = document.getElementById("submitMsg");
-
-      const rawName = nameField.value.trim();
-      if (!rawName) {
-        msgEl.textContent = "Please enter a name.";
-        return;
-      }
-
-      // Truncate for privacy
-      const shortName = rawName.substring(0, 12);
-
-      try {
-        const db = window._db;
-        const { collection, addDoc } = window._firestoreFns;
-
-        await addDoc(collection(db, "mesoLeaderboard"), {
-          name: shortName,
-          score: quizPoints,
-          ts: Date.now()
-        });
-
-        msgEl.textContent = "Score submitted!";
-        loadLeaderboard();
-      } catch (err) {
-        console.error(err);
-        msgEl.textContent = "Error saving score.";
-      }
-    });
-  }
-
+  /*********************************************************
+   * PART 7. LEADERBOARD (FIRESTORE)
+   *********************************************************/
   async function loadLeaderboard() {
     try {
       const db = window._db;
@@ -837,11 +728,198 @@
       .replace(/'/g,"&#039;");
   }
 
-  // hook up sidebar button
+  /*********************************************************
+   * PART 8. SUBMIT SCORE POPUP
+   * (NO REAL KEYBOARD. KIDS CLICK LETTER BUTTONS.)
+   *********************************************************/
+
+  async function saveScoreFlow() {
+    let currentName = ""; // we'll build this from on-screen buttons
+
+    // helper: build keyboard rows into HTML buttons
+    function rowHTML(letters) {
+      return letters.map(l => {
+        return `<button class="keyBtn" data-letter="${l}" style="
+          flex:1;
+          min-width:2rem;
+          background:#0f172a;
+          color:#f8fafc;
+          border:2px solid #334155;
+          border-radius:.5rem;
+          padding:.5rem .5rem;
+          font-size:.9rem;
+          font-weight:600;
+          cursor:pointer;
+        ">${l}</button>`;
+      }).join("");
+    }
+
+    function renderOverlay() {
+      const row1 = ["Q","W","E","R","T","Y","U","I","O","P"];
+      const row2 = ["A","S","D","F","G","H","J","K","L"];
+      const row3 = ["Z","X","C","V","B","N","M"];
+
+      const overlayHTML = `
+        <h2 style="margin-top:0;font-size:1rem;color:#38bdf8;font-weight:600;letter-spacing:-0.03em;">
+          Submit Score
+        </h2>
+
+        <p class="prompt" style="font-size:.9rem;line-height:1.4;margin:.5rem 0 1rem 0;color:#f8fafc;">
+          Tap letters to enter your initials or first name. (Max 12)
+        </p>
+
+        <div id="nameDisplay" style="
+          background:#0f172a;
+          border:2px solid #334155;
+          border-radius:.5rem;
+          padding:.6rem .75rem;
+          font-size:1rem;
+          font-weight:600;
+          color:#f8fafc;
+          text-align:center;
+          letter-spacing:.05em;
+          margin-bottom:1rem;
+          min-height:2.5rem;
+          display:flex;
+          align-items:center;
+          justify-content:center;
+        ">${currentName || "&nbsp;"}</div>
+
+        <div style="font-size:.8rem;color:#94a3b8;margin-bottom:1rem;line-height:1.4;">
+          Total Quiz Points:
+          <strong style="color:#f8fafc;">${quizPoints}</strong>
+        </div>
+
+        <!-- on-screen keyboard -->
+        <div style="display:flex;flex-direction:column;gap:.5rem;margin-bottom:1rem;">
+
+          <div style="display:flex;gap:.5rem;flex-wrap:wrap;justify-content:center;">
+            ${rowHTML(row1)}
+          </div>
+
+          <div style="display:flex;gap:.5rem;flex-wrap:wrap;justify-content:center;">
+            ${rowHTML(row2)}
+          </div>
+
+          <div style="display:flex;gap:.5rem;flex-wrap:wrap;justify-content:center;">
+            ${rowHTML(row3)}
+            <button id="bkspBtn" style="
+              flex:1;
+              min-width:3rem;
+              background:#450a0a;
+              color:#f8fafc;
+              border:2px solid #ef4444;
+              border-radius:.5rem;
+              padding:.5rem .5rem;
+              font-size:.8rem;
+              font-weight:600;
+              cursor:pointer;
+            ">⌫</button>
+          </div>
+
+        </div>
+
+        <div class="result-msg" id="submitMsg" style="
+          font-size:.8rem;
+          min-height:1.2em;
+          color:#facc15;
+          margin-bottom:1rem;
+          font-weight:500;
+        "></div>
+
+        <button class="btn" id="finalSubmitBtn" style="width:100%;margin-bottom:.5rem;">
+          Submit
+        </button>
+
+        <button class="btn" id="cancelSubmitBtn" style="
+          width:100%;
+          background:#334155;
+          color:#f8fafc;
+        ">
+          Cancel
+        </button>
+      `;
+
+      showOverlay(overlayHTML);
+
+      // after showOverlay, we can wire up the buttons
+      const nameDisplay = document.getElementById("nameDisplay");
+      const submitMsg = document.getElementById("submitMsg");
+      const cancelSubmitBtn = document.getElementById("cancelSubmitBtn");
+      const finalSubmitBtn = document.getElementById("finalSubmitBtn");
+      const bkspBtn = document.getElementById("bkspBtn");
+
+      // click letters to add them
+      document.querySelectorAll(".keyBtn").forEach(btn => {
+        btn.addEventListener("click", () => {
+          if (currentName.length >= 12) return;
+          const letter = btn.dataset.letter;
+          currentName = currentName + letter;
+          nameDisplay.innerHTML = currentName || "&nbsp;";
+        });
+      });
+
+      // backspace
+      bkspBtn.addEventListener("click", () => {
+        currentName = currentName.slice(0, -1);
+        nameDisplay.innerHTML = currentName || "&nbsp;";
+      });
+
+      // cancel button
+      cancelSubmitBtn.addEventListener("click", () => {
+        hideOverlay(); // give control back to game
+      });
+
+      // submit to Firestore
+      finalSubmitBtn.addEventListener("click", async () => {
+        const shortName = currentName.trim();
+        if (!shortName) {
+          submitMsg.textContent = "Please enter at least 1 letter.";
+          return;
+        }
+
+        try {
+          const db = window._db;
+          const { collection, addDoc } = window._firestoreFns;
+
+          await addDoc(collection(db, "mesoLeaderboard"), {
+            name: shortName,
+            score: quizPoints,
+            ts: Date.now()
+          });
+
+          submitMsg.textContent = "Score submitted!";
+          loadLeaderboard(); // refresh board on the right
+        } catch (err) {
+          console.error(err);
+          submitMsg.textContent = "Error saving score.";
+        }
+      });
+    } // end renderOverlay()
+
+    // show it
+    renderOverlay();
+  }
+
+  // Button in sidebar opens submit score popup
   document.getElementById("saveScoreBtn").addEventListener("click", saveScoreFlow);
 
-  // load leaderboard now
+  // Load leaderboard immediately on page load
   loadLeaderboard();
+
+  /*********************************************************
+   * PART 9. FIREBASE RULES REMINDER (not code, just note)
+   *********************************************************/
+  // In Firestore Rules you want:
+  // match /mesoLeaderboard/{docId} {
+  //   allow read: if true;
+  //   allow create: if true;
+  //   allow update: if false;
+  //   allow delete: if false;
+  // }
+  //
+  // That means kids can submit scores and everyone can read,
+  // but nobody can change or delete old scores.
 </script>
 
 </body>
